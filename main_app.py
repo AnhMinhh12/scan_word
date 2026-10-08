@@ -250,13 +250,21 @@ class ConveyorOcrApp:
         return val_lbl
 
     def log(self, message):
-        """Ghi thông báo vào khung nhật ký."""
+        """Ghi thông báo vào khung nhật ký và hiển thị trên terminal."""
         timestamp = datetime.now().strftime("%H:%M:%S")
         formatted = f"[{timestamp}] {message}\n"
-        self.log_text.config(state=tk.NORMAL)
-        self.log_text.insert(tk.END, formatted)
-        self.log_text.see(tk.END)
-        self.log_text.config(state=tk.DISABLED)
+        print(f"[{timestamp}] {message}", flush=True)
+
+        def _update():
+            try:
+                self.log_text.config(state=tk.NORMAL)
+                self.log_text.insert(tk.END, formatted)
+                self.log_text.see(tk.END)
+                self.log_text.config(state=tk.DISABLED)
+            except Exception:
+                pass
+
+        self.root.after(0, _update)
 
     def toggle_focus_mode(self):
         """Chuyển đổi giữa xem toàn cảnh và phóng to 1:1 vùng ROI để vặn nét."""

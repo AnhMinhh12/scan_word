@@ -7,12 +7,13 @@ BASE_DIR = Path(__file__).resolve().parent
 # --- CẤU HÌNH CAMERA BASLER ---
 CAMERA_IP = "192.168.3.3"
 CAMERA_EXPOSURE_TIME = 25000.0  # Thời gian phơi sáng mặc định (25ms), đủ sáng cho ánh sáng phòng
-CAMERA_GAIN = 0.0              # Gain (dB)
-PACKET_SIZE = 9000             # Kích thước gói GigE (Jumbo Frame) hoặc 1500 nếu card mạng chuẩn
+CAMERA_GAIN = 51.0             # Gain mặc định (cho acA3800-10gm Min là 51)
+PACKET_SIZE = 1500             # Kích thước gói GigE (1500 chuẩn MTU Ethernet Realtek để không drop packet)
+GEV_SCPD = 100                 # Độ trễ giữa các gói GigE (100 ticks giúp tăng FPS lên gấp đôi ~8FPS mà không nghẽn)
 
 # --- CẤU HÌNH OCR & INSPECTION ---
-TARGET_CODE = "10A"            # Mã ký tự tiêu chuẩn ca sản xuất
-CONFIDENCE_THRESHOLD = 0.75    # Ngưỡng độ tin cậy chấp nhận
+TARGET_CODE = "2.5"            # Mã ký tự tiêu chuẩn ca sản xuất (ví dụ 2.5, 2.5 GbE, 10A)
+CONFIDENCE_THRESHOLD = 0.60    # Ngưỡng độ tin cậy chấp nhận
 
 # --- CẤU HÌNH VÙNG QUAN TÂM (ROI - Region of Interest) ---
 # Tỷ lệ phần trăm [ymin, xmin, ymax, xmax] so với toàn khung hình (0.0 đến 1.0)

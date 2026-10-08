@@ -23,6 +23,7 @@ if sys.stdout.encoding != 'utf-8':
     except Exception:
         pass
 
+from contextlib import asynccontextmanager
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Query
 from fastapi.responses import HTMLResponse, StreamingResponse, FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
@@ -33,8 +34,13 @@ import config
 from camera_basler import BaslerGigECamera
 from ocr_engine import OcrInspector, InspectionResult
 
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    system_mgr.init_engines()
+    yield
+
 # --- Khởi tạo FastAPI App ---
-app = FastAPI(title="Conveyor OCR Basler Vision HMI", version="2.0.0")
+app = FastAPI(title="Conveyor OCR Basler Vision HMI", version="2.0.0", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -149,6 +155,13 @@ class VisionSystemManager:
 
     def init_engines(self):
         """Khởi tạo OCR và kết nối Camera Basler."""
+        # Giới hạn số luồng PyTorch để tránh nghẽn CPU và rớt gói GigE
+        try:
+            import torch
+            torch.set_num_threads(min(4, os.cpu_count() or 4))
+        except Exception:
+            pass
+
         self.add_log("Đang nạp mô hình OCR Engine...", "info")
         try:
             self.ocr_inspector = OcrInspector(
@@ -206,7 +219,7 @@ class VisionSystemManager:
             # Thu nhận khung hình
             frame = None
             try:
-                frame = self.camera.grab_frame(timeout_ms=1000)
+                frame = self.camera.grab_frame(timeout_ms=3000)
             except Exception as e:
                 self.cam_connected = False
                 self.add_log(f"Mất tín hiệu camera: {e}", "error")
@@ -316,6 +329,9 @@ class VisionSystemManager:
         if frame is None:
             with self.lock:
                 frame = self.latest_raw_frame.copy() if self.latest_raw_frame is not None else None
+
+        if frame is None and self.camera and self.camera.is_connected:
+            frame = self.camera.grab_frame(timeout_ms=3000)
 
         if frame is None:
             if self.fallback_frame is not None:
@@ -460,11 +476,6 @@ class VisionSystemManager:
 
 # Khởi tạo instance hệ thống
 system_mgr = VisionSystemManager()
-
-
-@app.on_event("startup")
-def startup_event():
-    system_mgr.init_engines()
 
 
 # ==========================================================

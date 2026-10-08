@@ -12,6 +12,7 @@ if sys.stdout.encoding != 'utf-8':
         sys.stdout.reconfigure(encoding='utf-8')
     except Exception:
         pass
+import config
 try:
     from pypylon import pylon
     PYPYLON_AVAILABLE = True
@@ -63,6 +64,37 @@ class BaslerGigECamera:
             self.serial_number = dev_info.GetSerialNumber()
             self.is_connected = True
 
+            # 1. Tắt TriggerMode để camera truyền frame liên tục (free-run), không đợi kích xung ngoài
+            try:
+                if hasattr(self.camera, "TriggerMode"):
+                    self.camera.TriggerMode.SetValue("Off")
+            except Exception as e:
+                print(f"[CẢNH BÁO] Không thể chỉnh TriggerMode: {e}")
+
+            # 2. Cấu hình Packet Size GigE phù hợp card mạng (1500 bytes tránh drop packet trên card Realtek)
+            try:
+                if hasattr(self.camera, "GevSCPSPacketSize"):
+                    pkt_size = getattr(config, "PACKET_SIZE", 1500)
+                    self.camera.GevSCPSPacketSize.SetValue(int(pkt_size))
+                    print(f"[BASLER] Đã thiết lập Packet Size: {pkt_size} bytes")
+            except Exception as e:
+                print(f"[CẢNH BÁO] Không thể cấu hình Packet Size: {e}")
+
+            # 3. Cấu hình Inter-Packet Delay (SCPD) để tránh tràn bộ đệm card mạng
+            try:
+                if hasattr(self.camera, "GevSCPD"):
+                    scpd = getattr(config, "GEV_SCPD", 100)
+                    self.camera.GevSCPD.SetValue(int(scpd))
+                    print(f"[BASLER] Đã thiết lập GevSCPD: {scpd} ticks")
+            except Exception:
+                pass
+
+            # 4. Tăng bộ đệm khung hình
+            try:
+                self.camera.MaxNumBuffer = 15
+            except Exception:
+                pass
+
             # Khởi tạo bộ chuyển đổi định dạng ảnh sang BGR8 của OpenCV
             self.converter = pylon.ImageFormatConverter()
             self.converter.OutputPixelFormat = pylon.PixelType_BGR8packed
@@ -113,13 +145,19 @@ class BaslerGigECamera:
                 print(f"[CẢNH BÁO] Không thể đổi ExposureAuto: {e}")
 
     def set_gain(self, gain_val):
-        """Cài đặt Gain khuếch đại tín hiệu sáng."""
+        """Cài đặt Gain khuếch đại tín hiệu sáng (tự động kẹp trong dải Min - Max hợp lệ)."""
         if self.camera and self.camera.IsOpen():
             try:
                 if hasattr(self.camera, "GainRaw"):
-                    self.camera.GainRaw.SetValue(int(gain_val))
+                    min_v = self.camera.GainRaw.GetMin()
+                    max_v = self.camera.GainRaw.GetMax()
+                    val = int(max(min_v, min(max_v, int(gain_val))))
+                    self.camera.GainRaw.SetValue(val)
                 elif hasattr(self.camera, "Gain"):
-                    self.camera.Gain.SetValue(float(gain_val))
+                    min_v = self.camera.Gain.GetMin()
+                    max_v = self.camera.Gain.GetMax()
+                    val = float(max(min_v, min(max_v, float(gain_val))))
+                    self.camera.Gain.SetValue(val)
             except Exception as e:
                 print(f"[CẢNH BÁO] Không thể chỉnh Gain: {e}")
 
@@ -141,7 +179,11 @@ class BaslerGigECamera:
             grab_result.Release()
             return None
         except Exception as e:
-            print(f"[LỖI GRAB] {e}")
+            err_msg = str(e)
+            if "TimeoutException" in err_msg:
+                print(f"[LỖI GRAB] Hết thời gian chờ nhận ảnh (Timeout {timeout_ms}ms). Gói tin có thể bị chặn bởi MTU hoặc Trigger.")
+            else:
+                print(f"[LỖI GRAB] {e}")
             return None
 
     def disconnect(self):
