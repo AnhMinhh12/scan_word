@@ -1,0 +1,18 @@
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+*.env
+.venv/
+venv/
+
+# Thư mục lưu ảnh camera kiểm tra (tránh nặng git)
+records/OK/*.jpg
+records/NG/*.jpg
+records/TEST/*.jpg
+!records/**/.gitkeep
+
+# IDE & Editor
+.vscode/
+.idea/
+*.swp

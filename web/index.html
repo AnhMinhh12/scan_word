@@ -1,0 +1,438 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Hệ Thống Kiểm Tra OCR Camera Basler GigE | Web HMI</title>
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body class="theme-light">
+    <!-- Top Header -->
+    <header class="hmi-header" id="hmiHeader">
+        <div class="header-brand">
+            <div class="brand-logo-icon">
+                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
+                    <rect x="2" y="3" width="20" height="14" rx="2" ry="2"></rect>
+                    <line x1="8" y1="21" x2="16" y2="21"></line>
+                    <line x1="12" y1="17" x2="12" y2="21"></line>
+                    <circle cx="12" cy="10" r="3"></circle>
+                </svg>
+            </div>
+            <div class="brand-text">
+                <h1 class="brand-title">HỆ THỐNG KIỂM TRA OCR CAMERA BASLER</h1>
+                <span class="brand-subtitle">INDUSTRIAL VISION · MODEL acA3800-10gm (3840×2748)</span>
+            </div>
+        </div>
+
+        <div class="header-badges">
+            <div class="status-pill" id="camStatusPill">
+                <span class="status-dot pulse" id="camStatusDot"></span>
+                <span class="status-label" id="camStatusText">CAMERA: ĐANG TÌM THIẾT BỊ...</span>
+            </div>
+
+            <div class="metric-pill">
+                <span class="pill-label">IP:</span>
+                <span class="pill-val" id="headerCamIp">192.168.3.3</span>
+            </div>
+
+            <div class="metric-pill">
+                <span class="pill-label">FPS:</span>
+                <span class="pill-val" id="headerFps">0.0</span>
+            </div>
+
+            <div class="metric-pill">
+                <span class="pill-label">GIỜ:</span>
+                <span class="pill-val" id="headerClock">--:--:--</span>
+            </div>
+
+            <!-- Nút đổi theme sáng/tối -->
+            <button class="icon-btn" id="btnThemeToggle" title="Chuyển đổi giao diện Sáng / Tối">
+                <svg id="themeIconSun" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <circle cx="12" cy="12" r="5"></circle>
+                    <line x1="12" y1="1" x2="12" y2="3"></line>
+                    <line x1="12" y1="21" x2="12" y2="23"></line>
+                    <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line>
+                    <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line>
+                    <line x1="1" y1="12" x2="3" y2="12"></line>
+                    <line x1="21" y1="12" x2="23" y2="12"></line>
+                    <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line>
+                    <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line>
+                </svg>
+            </button>
+
+            <!-- Toàn màn hình -->
+            <button class="icon-btn" id="btnFullscreenToggle" title="Toàn màn hình (F11)">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"></path>
+                </svg>
+            </button>
+        </div>
+    </header>
+
+    <!-- Horizontal Navigation Tabs Bar -->
+    <nav class="hmi-nav-tabs">
+        <button class="nav-tab-item active" id="navTabMonitor" data-target="viewMonitor">
+            <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <circle cx="12" cy="12" r="10"></circle>
+                <circle cx="12" cy="12" r="3"></circle>
+            </svg>
+            <span>GIÁM SÁT & VẬN HÀNH</span>
+        </button>
+
+        <button class="nav-tab-item" id="navTabSettings" data-target="viewSettings">
+            <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <circle cx="12" cy="12" r="3"></circle>
+                <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+            </svg>
+            <span>CÀI ĐẶT CAMERA & VÙNG QUÉT ROI</span>
+        </button>
+
+        <button class="nav-tab-item" id="navTabGallery" data-target="viewGallery">
+            <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
+                <circle cx="8.5" cy="8.5" r="1.5"></circle>
+                <polyline points="21 15 16 10 5 21"></polyline>
+            </svg>
+            <span>LỊCH SỬ SẢN PHẨM (OK / NG)</span>
+        </button>
+
+        <button class="nav-tab-item" id="navTabLogs" data-target="viewLogs">
+            <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <polyline points="4 17 10 11 4 5"></polyline>
+                <line x1="12" y1="19" x2="20" y2="19"></line>
+            </svg>
+            <span>NHẬT KÝ HỆ THỐNG</span>
+        </button>
+    </nav>
+
+    <!-- Main Workspace Container (Zero-Scroll 100vh Layout) -->
+    <main class="hmi-workspace-container">
+        <!-- ========================================================
+             TAB 1: GIÁM SÁT & VẬN HÀNH (LIVE MONITORING & OPERATIONS)
+             ======================================================== -->
+        <section class="hmi-view-pane active" id="viewMonitor">
+            <div class="monitor-layout">
+                <!-- Cột trái: Live Video Monitor & Result Banner -->
+                <div class="monitor-left">
+                    <div class="video-container-card">
+                        <!-- Toolbar nhỏ ngay trên video -->
+                        <div class="video-minibar">
+                            <div class="minibar-left">
+                                <span class="badge-live"><span class="dot-live"></span> LIVE</span>
+                                <span class="badge-mode" id="viewModeBadge">TOÀN CẢNH CẢM BIẾN</span>
+                            </div>
+                            <div class="minibar-right">
+                                <button class="btn-micro" id="btnFocusMode" title="Phóng to 1:1 vùng chữ để vặn nét ống kính">
+                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                        <circle cx="11" cy="11" r="8"></circle>
+                                        <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+                                        <line x1="11" y1="8" x2="11" y2="14"></line>
+                                        <line x1="8" y1="11" x2="14" y2="11"></line>
+                                    </svg>
+                                    <span id="btnFocusModeText">SOI NÉT 1:1</span>
+                                </button>
+                                <button class="btn-micro" id="btnGridToggle" title="Bật/tắt lưới ngắm căn góc">
+                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                        <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
+                                        <line x1="3" y1="9" x2="21" y2="9"></line>
+                                        <line x1="3" y1="15" x2="21" y2="15"></line>
+                                        <line x1="9" y1="3" x2="9" y2="21"></line>
+                                        <line x1="15" y1="3" x2="15" y2="21"></line>
+                                    </svg>
+                                    <span>LƯỚI</span>
+                                </button>
+                            </div>
+                        </div>
+
+                        <!-- Khung hình Live Video Stream -->
+                        <div class="video-viewport" id="videoStage">
+                            <img id="streamImg" src="/video_feed" alt="Video feed từ camera Basler" />
+                            <div class="grid-overlay" id="gridOverlay"></div>
+                        </div>
+                    </div>
+
+                    <!-- Result Status Banner gọn gàng -->
+                    <div class="result-banner-strip banner-standby" id="resultBanner">
+                        <div class="banner-badge-box" id="bannerStatusBadge">STANDBY</div>
+                        <div class="banner-info-box">
+                            <div class="banner-primary-line" id="bannerMsg">SẴN SÀNG KIỂM TRA MÃ SẢN PHẨM</div>
+                            <div class="banner-sub-meta">
+                                <span>MÃ ĐỌC: <strong id="bannerDetectedCode">--</strong></span>
+                                <span class="sep">|</span>
+                                <span>MỤC TIÊU: <strong id="bannerTargetCode">10A</strong></span>
+                                <span class="sep">|</span>
+                                <span>ĐỘ KHỚP: <strong id="bannerConfidence">--%</strong></span>
+                                <span class="sep">|</span>
+                                <span>TỐC ĐỘ: <strong id="bannerLatency">-- ms</strong></span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Cột phải: Control & Dashboard gọn gàng trong 1 màn hình -->
+                <div class="monitor-right">
+                    <!-- 1. Nút kích chụp lớn nhất -->
+                    <div class="card-box trigger-card-box">
+                        <button class="btn-hero-trigger" id="btnTriggerShot">
+                            <span class="hero-icon">⚡</span>
+                            <div class="hero-texts">
+                                <span class="hero-label">CHỤP & KIỂM TRA (1 ẢNH)</span>
+                                <span class="hero-sublabel">Phím tắt: [SPACE] hoặc [ENTER]</span>
+                            </div>
+                        </button>
+
+                        <div class="trigger-sub-row">
+                            <div class="sub-toggle">
+                                <label class="toggle-switch">
+                                    <input type="checkbox" id="switchAutoInspect">
+                                    <span class="toggle-slider"></span>
+                                </label>
+                                <span class="toggle-title">Tự Động Quét Chu Kỳ (2.0s)</span>
+                            </div>
+                            <div class="target-quick-badge">
+                                <span class="lbl">MÃ CA:</span>
+                                <span class="val" id="monitorTargetDisplay">10A</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- 2. Thống kê sản lượng 4 chỉ số -->
+                    <div class="card-box stats-card-box">
+                        <div class="box-head">
+                            <span class="box-title">THỐNG KÊ SẢN LƯỢNG CA CHẠY</span>
+                            <button class="btn-action-small" id="btnResetStats">Reset Bộ Đếm</button>
+                        </div>
+                        <div class="kpi-mini-grid">
+                            <div class="kpi-pill kpi-total">
+                                <span class="kpi-label">TỔNG ĐÃ QUÉT</span>
+                                <span class="kpi-val" id="kpiTotal">0</span>
+                            </div>
+                            <div class="kpi-pill kpi-ok">
+                                <span class="kpi-label">ĐẠT (OK)</span>
+                                <span class="kpi-val" id="kpiOk">0</span>
+                            </div>
+                            <div class="kpi-pill kpi-ng">
+                                <span class="kpi-label">LỖI (NG)</span>
+                                <span class="kpi-val" id="kpiNg">0</span>
+                            </div>
+                            <div class="kpi-pill kpi-rate">
+                                <span class="kpi-label">TỶ LỆ LỖI %</span>
+                                <span class="kpi-val" id="kpiRate">0.0%</span>
+                            </div>
+                        </div>
+                        <div class="kpi-progress-bar">
+                            <div class="kpi-progress-fill" id="rateBarFill" style="width: 0%;"></div>
+                        </div>
+                    </div>
+
+                    <!-- 3. Dải ảnh quét gần đây -->
+                    <div class="card-box reel-card-box">
+                        <div class="box-head">
+                            <span class="box-title">ẢNH KIỂM TRA GẦN ĐÂY</span>
+                            <span class="box-counter" id="reelCountText">0 ảnh</span>
+                        </div>
+                        <div class="recent-reel-strip" id="recentReelStrip">
+                            <div class="reel-empty">Chưa có ảnh nào được quét trong phiên.</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- ========================================================
+             TAB 2: CÀI ĐẶT CAMERA & VÙNG QUÉT (SETTINGS & OPTICS)
+             ======================================================== -->
+        <section class="hmi-view-pane" id="viewSettings">
+            <div class="settings-grid-layout">
+                <!-- Card 1: Ca Sản Xuất (Target Code) -->
+                <div class="card-box settings-col">
+                    <div class="box-head">
+                        <span class="box-title">1. CA SẢN XUẤT & MÃ TIÊU CHUẨN</span>
+                    </div>
+                    <div class="setting-form-group">
+                        <label class="form-label">Mã Ký Tự Tiêu Chuẩn Ca Này:</label>
+                        <div class="input-with-button">
+                            <input type="text" id="inputTargetCode" class="clean-input" value="10A" placeholder="Nhập mã chuẩn..." />
+                            <button class="btn-primary-small" id="btnSaveTarget">LƯU MÃ</button>
+                        </div>
+                    </div>
+                    <div class="preset-box">
+                        <span class="preset-title">Mẫu ký tự chọn nhanh:</span>
+                        <div class="chips-row">
+                            <button class="chip-item" data-code="10A">10A</button>
+                            <button class="chip-item" data-code="20B">20B</button>
+                            <button class="chip-item" data-code="SEAT">SEAT</button>
+                            <button class="chip-item" data-code="BATCH-01">BATCH-01</button>
+                            <button class="chip-item" data-code="OK-100">OK-100</button>
+                        </div>
+                    </div>
+                    <div class="setting-hint">
+                        💡 <em>Hệ thống có bộ so khớp thông minh tự sửa các ký tự dễ nhầm lẫn như O/0, I/1, B/8 trên phôi in/khắc mờ.</em>
+                    </div>
+                </div>
+
+                <!-- Card 2: Điều chỉnh Camera Basler -->
+                <div class="card-box settings-col">
+                    <div class="box-head">
+                        <span class="box-title">2. THÔNG SỐ QUANG HỌC CAMERA BASLER</span>
+                    </div>
+
+                    <!-- Auto Exposure Switch -->
+                    <div class="setting-switch-row">
+                        <div>
+                            <span class="switch-main">Tự Động Cân Sáng (Auto Exposure)</span>
+                            <span class="switch-sub">Tự động thích ứng môi trường ánh sáng</span>
+                        </div>
+                        <label class="toggle-switch">
+                            <input type="checkbox" id="switchAutoExp" checked>
+                            <span class="toggle-slider"></span>
+                        </label>
+                    </div>
+
+                    <!-- Exposure Slider -->
+                    <div class="slider-box">
+                        <div class="slider-info">
+                            <span>Thời gian phơi sáng (Exposure Time):</span>
+                            <span class="slider-badge" id="valExposure">25000 µs</span>
+                        </div>
+                        <input type="range" id="sliderExposure" min="1000" max="80000" step="500" value="25000" class="clean-slider" />
+                        <div class="quick-exp-chips">
+                            <button class="chip-mini" data-exp="5000">5 ms</button>
+                            <button class="chip-mini" data-exp="15000">15 ms</button>
+                            <button class="chip-mini" data-exp="25000">25 ms</button>
+                            <button class="chip-mini" data-exp="40000">40 ms</button>
+                        </div>
+                    </div>
+
+                    <!-- Gain Slider -->
+                    <div class="slider-box">
+                        <div class="slider-info">
+                            <span>Khuếch đại độ sáng (Gain):</span>
+                            <span class="slider-badge" id="valGain">0 dB</span>
+                        </div>
+                        <input type="range" id="sliderGain" min="0" max="300" step="5" value="0" class="clean-slider" />
+                    </div>
+                </div>
+
+                <!-- Card 3: Vùng Quan Tâm ROI -->
+                <div class="card-box settings-col">
+                    <div class="box-head">
+                        <span class="box-title">3. VÙNG QUAN TÂM NHẬN DIỆN (ROI)</span>
+                    </div>
+
+                    <div class="roi-sliders-container">
+                        <div class="roi-range-row">
+                            <div class="slider-info">
+                                <span>Y-Min (Biên trên):</span>
+                                <span class="slider-badge" id="valYMin">25%</span>
+                            </div>
+                            <input type="range" id="sliderYMin" min="0" max="90" value="25" class="clean-slider" />
+                        </div>
+
+                        <div class="roi-range-row">
+                            <div class="slider-info">
+                                <span>Y-Max (Biên dưới):</span>
+                                <span class="slider-badge" id="valYMax">75%</span>
+                            </div>
+                            <input type="range" id="sliderYMax" min="10" max="100" value="75" class="clean-slider" />
+                        </div>
+
+                        <div class="roi-range-row">
+                            <div class="slider-info">
+                                <span>X-Min (Biên trái):</span>
+                                <span class="slider-badge" id="valXMin">25%</span>
+                            </div>
+                            <input type="range" id="sliderXMin" min="0" max="90" value="25" class="clean-slider" />
+                        </div>
+
+                        <div class="roi-range-row">
+                            <div class="slider-info">
+                                <span>X-Max (Biên phải):</span>
+                                <span class="slider-badge" id="valXMax">75%</span>
+                            </div>
+                            <input type="range" id="sliderXMax" min="10" max="100" value="75" class="clean-slider" />
+                        </div>
+                    </div>
+
+                    <div class="preset-box">
+                        <span class="preset-title">Mẫu vùng chọn nhanh:</span>
+                        <div class="chips-row">
+                            <button class="chip-item" id="btnRoiPresetDefault">Chuẩn 50%</button>
+                            <button class="chip-item" id="btnRoiPresetCenter">Tâm Hẹp 30%</button>
+                            <button class="chip-item" id="btnRoiPresetFull">Toàn Khung 100%</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- ========================================================
+             TAB 3: LỊCH SỬ SẢN PHẨM (OK / NG ARCHIVE)
+             ======================================================== -->
+        <section class="hmi-view-pane" id="viewGallery">
+            <div class="gallery-full-layout">
+                <div class="gallery-top-controls">
+                    <div class="filter-group">
+                        <button class="filter-chip active" data-filter="ALL">Tất cả ảnh</button>
+                        <button class="filter-chip chip-ok" data-filter="OK">Chỉ ảnh ĐẠT (OK)</button>
+                        <button class="filter-chip chip-ng" data-filter="NG">Chỉ ảnh LỖI (NG)</button>
+                    </div>
+                    <button class="btn-refresh" id="btnRefreshGallery">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"></path>
+                        </svg>
+                        Làm mới danh sách
+                    </button>
+                </div>
+
+                <div class="gallery-scroll-grid" id="galleryGrid">
+                    <!-- Ảnh tải động từ JS -->
+                </div>
+            </div>
+        </section>
+
+        <!-- ========================================================
+             TAB 4: NHẬT KÝ HỆ THỐNG (AUDIT LOGS)
+             ======================================================== -->
+        <section class="hmi-view-pane" id="viewLogs">
+            <div class="logs-full-layout">
+                <div class="logs-top-bar">
+                    <span class="logs-title">System Console · Nhật Ký Sự Kiện Realtime</span>
+                    <button class="btn-clear-logs" id="btnClearLogs">Xóa lịch sử log</button>
+                </div>
+                <div class="logs-viewport" id="terminalLogBody">
+                    <!-- Log entries rendered by JS -->
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <!-- Modal Xem Ảnh Chi Tiết Phóng To -->
+    <div class="modal-backdrop" id="imageModal">
+        <div class="modal-card">
+            <div class="modal-header">
+                <div class="modal-title-group">
+                    <h3 class="modal-title" id="modalImgTitle">Chi Tiết Ảnh Sản Phẩm</h3>
+                    <span class="modal-badge" id="modalImgBadge">OK</span>
+                </div>
+                <button class="modal-close-btn" id="btnModalClose">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="modal-img-wrapper">
+                    <img id="modalImgTag" src="" alt="Ảnh chi tiết" />
+                </div>
+                <div class="modal-details" id="modalDetails"></div>
+            </div>
+            <div class="modal-footer">
+                <a class="btn-primary-small" id="btnDownloadImg" href="" download target="_blank">TẢI VỀ ẢNH GỐC ĐỘ NÉT CAO</a>
+            </div>
+        </div>
+    </div>
+
+    <script src="/static/js/app.js"></script>
+</body>
+</html>
