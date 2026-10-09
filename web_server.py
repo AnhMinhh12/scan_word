@@ -23,8 +23,34 @@ if sys.stdout.encoding != 'utf-8':
     except Exception:
         pass
 
+# Khắc phục lỗi [WinError 10054] ConnectionResetError kinh điển trên Windows
+if sys.platform == "win32":
+    try:
+        import asyncio
+        asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
+    except Exception:
+        pass
+    try:
+        from functools import wraps
+        from asyncio.proactor_events import _ProactorBasePipeTransport
+
+        def silence_connection_lost(func):
+            @wraps(func)
+            def wrapper(self, *args, **kwargs):
+                try:
+                    return func(self, *args, **kwargs)
+                except (ConnectionResetError, OSError):
+                    pass
+            return wrapper
+
+        _ProactorBasePipeTransport._call_connection_lost = silence_connection_lost(
+            _ProactorBasePipeTransport._call_connection_lost
+        )
+    except Exception:
+        pass
+
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Query
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, StreamingResponse, FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
@@ -106,8 +132,10 @@ class VisionSystemManager:
         self.frame_count = 0
         self.fps_timer = time.time()
         
-        # Kết quả kiểm tra gần nhất
+        # Kết quả kiểm tra gần nhất & Trạng thái xử lý ngầm
         self.last_result: Optional[Dict[str, Any]] = None
+        self.is_processing = False
+        self.inspect_lock = threading.Lock()
         
         # Nhật ký hệ thống (tối đa 150 dòng)
         self.logs = []
@@ -153,6 +181,15 @@ class VisionSystemManager:
         if len(self.logs) > 150:
             self.logs.pop(0)
 
+        # In ngay ra Console Terminal để theo dõi trực tiếp trong PowerShell/CMD
+        tag = {
+            "info": "[INFO]",
+            "success": "[OK]",
+            "warning": "[CẢNH BÁO]",
+            "error": "[LỖI]"
+        }.get(level, "[LOG]")
+        print(f"[{timestamp}] {tag} {text}")
+
     def init_engines(self):
         """Khởi tạo OCR và kết nối Camera Basler."""
         # Giới hạn số luồng PyTorch để tránh nghẽn CPU và rớt gói GigE
@@ -172,46 +209,53 @@ class VisionSystemManager:
         except Exception as e:
             self.add_log(f"Lỗi khởi tạo OCR: {e}", "error")
 
+        # Thử kết nối Camera ngay lập tức và in trạng thái rõ ràng
+        self.add_log(f"Đang tìm kiếm và kết nối Camera Basler (IP cấu hình: {self.cam_ip})...", "info")
+        self._connect_camera_safe(verbose=True)
+
         # Khởi chạy luồng camera và auto-inspect
         self.worker_thread = threading.Thread(target=self._camera_background_loop, daemon=True)
         self.worker_thread.start()
 
-    def _connect_camera_safe(self) -> bool:
+    def _connect_camera_safe(self, verbose: bool = True) -> bool:
         """Thử kết nối Camera Basler với xử lý ngoại lệ an toàn."""
         try:
             self.camera = BaslerGigECamera(
                 ip_address=self.cam_ip,
-                exposure_time=self.exposure_time
+                exposure_time=self.exposure_time,
+                auto_exposure=self.auto_exposure,
+                gain=self.gain
             )
             self.camera.connect()
             self.cam_connected = True
             self.cam_model = self.camera.model_name
             self.cam_serial = self.camera.serial_number
-            
-            # Đồng bộ cấu hình ban đầu
-            self.camera.set_auto_exposure(self.auto_exposure)
-            if not self.auto_exposure:
-                self.camera.set_exposure_time(self.exposure_time)
-            self.camera.set_gain(self.gain)
-            
-            self.add_log(f"Camera Basler ONLINE: {self.cam_model} (S/N: {self.cam_serial})", "success")
+            self.cam_ip = self.camera.ip_address
+
+            self.add_log(f"Camera Basler ONLINE: {self.cam_model} (S/N: {self.cam_serial}, IP: {self.cam_ip})", "success")
             return True
         except Exception as e:
             self.cam_connected = False
-            self.add_log(f"Chưa kết nối được camera ({self.cam_ip}): {e}", "warning")
+            if verbose:
+                self.add_log(f"Chưa kết nối được camera ({self.cam_ip}): {e}", "warning")
             return False
 
     def _camera_background_loop(self):
         """Vòng lặp ngầm liên tục lấy khung hình từ Camera Basler."""
         last_conn_try = 0
+        last_log_warn = 0
         while self.running:
             now = time.time()
-            
+
             # Kiểm tra & Tự động kết nối lại nếu mất tín hiệu
             if not self.cam_connected:
                 if now - last_conn_try > 3.0:
                     last_conn_try = now
-                    self._connect_camera_safe()
+                    # Chỉ in cảnh báo chi tiết mỗi 15 giây để tránh tràn màn hình
+                    should_log = (now - last_log_warn > 15.0)
+                    if should_log:
+                        last_log_warn = now
+                    self._connect_camera_safe(verbose=should_log)
                 if not self.cam_connected:
                     time.sleep(0.1)
                     continue
@@ -223,6 +267,7 @@ class VisionSystemManager:
             except Exception as e:
                 self.cam_connected = False
                 self.add_log(f"Mất tín hiệu camera: {e}", "error")
+                last_log_warn = now
                 time.sleep(1.0)
                 continue
 
@@ -407,6 +452,47 @@ class VisionSystemManager:
 
         return res_payload
 
+    def trigger_inspection_async(self) -> Dict[str, Any]:
+        """
+        Kích hoạt chụp tức thì: Lấy frame ngay lập tức (<5ms)
+        và giao việc chạy mô hình OCR cho luồng ngầm để giao diện không bị giật/đơ.
+        """
+        with self.lock:
+            frame = self.latest_raw_frame.copy() if self.latest_raw_frame is not None else None
+
+        if frame is None and self.camera and self.camera.is_connected:
+            try:
+                frame = self.camera.grab_frame(timeout_ms=1000)
+            except Exception:
+                pass
+
+        if frame is None:
+            if self.fallback_frame is not None:
+                frame = self.fallback_frame.copy()
+            else:
+                raise ValueError("Không có khung hình nào từ camera để chụp.")
+
+        self.is_processing = True
+
+        # Đẩy việc chạy OCR vào luồng chạy ngầm
+        threading.Thread(target=self._worker_execute_inspection, args=(frame,), daemon=True).start()
+
+        return {
+            "status": "capturing",
+            "message": "Đã chộp khung hình thành công. Đang phân tích OCR ngầm...",
+            "timestamp": datetime.now().strftime("%H:%M:%S")
+        }
+
+    def _worker_execute_inspection(self, frame: np.ndarray):
+        """Thực thi OCR ngầm an toàn."""
+        with self.inspect_lock:
+            try:
+                self.trigger_inspection(frame)
+            except Exception as e:
+                self.add_log(f"Lỗi khi xử lý OCR ngầm: {e}", "error")
+            finally:
+                self.is_processing = False
+
     def set_camera_exposure(self, exposure_us: float, auto: bool):
         self.exposure_time = exposure_us
         self.auto_exposure = auto
@@ -486,20 +572,25 @@ def index_page():
     return FileResponse(WEB_DIR / "index.html")
 
 
-def mjpeg_stream_generator():
-    """Tạo chuỗi MJPEG trực tiếp cho thẻ <img> trên trình duyệt."""
-    while True:
-        frame = system_mgr.get_display_frame()
-        # Nén JPEG tốc độ cao
-        ret, jpeg = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 80])
-        if ret:
-            yield (b'--frame\r\n'
-                   b'Content-Type: image/jpeg\r\n\r\n' + jpeg.tobytes() + b'\r\n')
-        time.sleep(0.035)  # ~28 FPS mượt mà và tiết kiệm băng thông
-
-
 @app.get("/video_feed")
-def video_feed():
+async def video_feed(request: Request):
+    async def mjpeg_stream_generator():
+        """Tạo chuỗi MJPEG trực tiếp cho thẻ <img> trên trình duyệt."""
+        try:
+            while True:
+                if await request.is_disconnected():
+                    break
+                frame = system_mgr.get_display_frame()
+                ret, jpeg = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 80])
+                if ret:
+                    yield (b'--frame\r\n'
+                           b'Content-Type: image/jpeg\r\n\r\n' + jpeg.tobytes() + b'\r\n')
+                await asyncio.sleep(0.04)  # ~25 FPS mượt mà và non-blocking
+        except (asyncio.CancelledError, GeneratorExit):
+            pass
+        except Exception:
+            pass
+
     return StreamingResponse(
         mjpeg_stream_generator(),
         media_type="multipart/x-mixed-replace; boundary=frame"
@@ -525,17 +616,23 @@ def get_status():
         "target_code": system_mgr.target_code,
         "roi": system_mgr.roi,
         "stats": system_mgr.stats,
+        "is_processing": system_mgr.is_processing,
         "last_result": system_mgr.last_result,
         "logs": system_mgr.logs[-30:]
     }
 
 
 @app.post("/api/trigger")
-def trigger_inspection_endpoint():
+def trigger_inspection_endpoint(sync: bool = False):
     try:
-        res = system_mgr.trigger_inspection()
-        return {"success": True, "data": res}
+        if sync:
+            res = system_mgr.trigger_inspection()
+            return {"success": True, "data": res}
+        else:
+            res = system_mgr.trigger_inspection_async()
+            return {"success": True, "data": res}
     except Exception as e:
+        system_mgr.add_log(f"Lỗi khi kích chụp: {e}", "error")
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -610,20 +707,29 @@ async def websocket_endpoint(websocket: WebSocket):
                 "stats": system_mgr.stats,
                 "focus_mode": system_mgr.focus_mode,
                 "auto_inspect": system_mgr.auto_inspect,
+                "is_processing": system_mgr.is_processing,
                 "last_result": system_mgr.last_result,
                 "logs": system_mgr.logs[-15:]
             }
             await websocket.send_json(telemetry)
             await asyncio.sleep(0.5)
-    except WebSocketDisconnect:
-        if websocket in system_mgr.ws_clients:
-            system_mgr.ws_clients.remove(websocket)
+    except (WebSocketDisconnect, ConnectionResetError, asyncio.CancelledError):
+        pass
     except Exception:
+        pass
+    finally:
         if websocket in system_mgr.ws_clients:
             system_mgr.ws_clients.remove(websocket)
 
 
 def main():
+    if sys.platform == "win32":
+        try:
+            import asyncio
+            asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
+        except Exception:
+            pass
+
     print("="*65)
     print(" KHỞI ĐỘNG HỆ THỐNG GIAO DIỆN WEB HMI - OCR BASLER GIGE ")
     print(" Truy cập tại trình duyệt: http://localhost:8000")

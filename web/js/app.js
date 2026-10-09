@@ -18,6 +18,7 @@ const state = {
     roi: { ymin: 0.25, xmin: 0.25, ymax: 0.75, xmax: 0.75 },
     stats: { total: 0, ok: 0, ng: 0, ng_rate: 0.0 },
     lastResult: null,
+    isProcessing: false,
     recentReel: [],
     galleryFilter: "ALL",
     theme: "light"
@@ -44,6 +45,7 @@ const el = {
     viewModeBadge: document.getElementById("viewModeBadge"),
     btnGridToggle: document.getElementById("btnGridToggle"),
     gridOverlay: document.getElementById("gridOverlay"),
+    shutterFlashOverlay: document.getElementById("shutterFlashOverlay"),
     streamImg: document.getElementById("streamImg"),
 
     // Result Banner
@@ -299,6 +301,9 @@ function renderInspectionResult(res) {
     if (!res) return;
     state.lastResult = res;
 
+    // Hồi phục trạng thái nút bấm và kết thúc xử lý
+    setProcessingState(false);
+
     if (res.is_pass) {
         el.resultBanner.className = "result-banner-strip banner-pass";
         el.bannerStatusBadge.textContent = "PASS (OK)";
@@ -530,26 +535,119 @@ function bindEvents() {
 }
 
 // ==========================================================
-// ACTIONS & API
+// ACTIONS & API (CHỤP TỨC THÌ & XỬ LÝ NGẦM)
 // ==========================================================
+
+// 1. Âm thanh màn trập (Shutter Sound) mô phỏng chân thực bằng Web Audio API
+function playShutterSound() {
+    try {
+        const AudioCtx = window.AudioContext || window.webkitAudioContext;
+        if (!AudioCtx) return;
+        const ctx = new AudioCtx();
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.type = "sine";
+        osc.frequency.setValueAtTime(800, ctx.currentTime);
+        osc.frequency.exponentialRampToValueAtTime(120, ctx.currentTime + 0.045);
+        gain.gain.setValueAtTime(0.35, ctx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.05);
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.start();
+        osc.stop(ctx.currentTime + 0.05);
+    } catch (e) {
+        // Trình duyệt chưa cho phép audio hoặc không hỗ trợ, bỏ qua
+    }
+}
+
+// 2. Hiệu ứng chớp sáng màn trập (Shutter Flash Animation)
+function triggerShutterFlash() {
+    if (el.shutterFlashOverlay) {
+        el.shutterFlashOverlay.classList.add("active");
+        setTimeout(() => {
+            el.shutterFlashOverlay.classList.remove("active");
+        }, 75);
+    }
+}
+
+// 3. Đổi trạng thái giao diện khi bắt đầu chụp / kết thúc xử lý
+function setProcessingState(isProcessing) {
+    state.isProcessing = isProcessing;
+
+    if (isProcessing) {
+        el.btnTriggerShot.classList.add("btn-processing");
+        const lbl = el.btnTriggerShot.querySelector(".hero-label");
+        const sub = el.btnTriggerShot.querySelector(".hero-sublabel");
+        if (lbl) lbl.textContent = "⚡ ĐÃ CHỤP! ĐANG NHẬN DIỆN...";
+        if (sub) sub.textContent = "Đang xử lý mô hình OCR ngầm...";
+
+        // Cập nhật thanh kết quả sang trạng thái đang phân tích
+        el.resultBanner.className = "result-banner-strip banner-processing";
+        el.bannerStatusBadge.textContent = "ĐANG ĐỌC...";
+        el.bannerMsg.textContent = "⚡ ĐÃ CHỤP XONG ẢNH — ĐANG PHÂN TÍCH KÝ TỰ NGẦM...";
+        el.bannerDetectedCode.textContent = "Đang quét...";
+        el.bannerConfidence.textContent = "...";
+        el.bannerLatency.textContent = "...";
+    } else {
+        el.btnTriggerShot.classList.remove("btn-processing");
+        const lbl = el.btnTriggerShot.querySelector(".hero-label");
+        const sub = el.btnTriggerShot.querySelector(".hero-sublabel");
+        if (lbl) lbl.textContent = "CHỤP & KIỂM TRA (1 ẢNH)";
+        if (sub) sub.textContent = "Phím tắt: [SPACE] hoặc [ENTER]";
+        el.btnTriggerShot.disabled = false;
+        el.btnTriggerShot.style.opacity = "1";
+    }
+}
+
 async function triggerSingleInspection() {
-    el.btnTriggerShot.disabled = true;
-    el.btnTriggerShot.style.opacity = "0.7";
+    if (state.isProcessing) return; // Tránh bấm dồn dập trong lúc vừa bấm
+
+    // BƯỚC 1: NGAY LẬP TỨC (0ms) - Phát tín hiệu chớp sáng màn trập & âm thanh chụp
+    triggerShutterFlash();
+    playShutterSound();
+
+    // BƯỚC 2: NGAY LẬP TỨC - Đổi trạng thái nút bấm & banner sang "ĐÃ CHỤP! ĐANG NHẬN DIỆN..."
+    setProcessingState(true);
 
     try {
+        // BƯỚC 3: Gửi lệnh chụp đến Server (Server chộp khung hình trong <5ms và trả về ngay)
         const res = await fetch("/api/trigger", { method: "POST" });
         const json = await res.json();
+
         if (json.success && json.data) {
-            renderInspectionResult(json.data);
-            updateStatsUI(json.data.stats);
+            // Nếu server trả về kết quả đầy đủ ngay
+            if (json.data.detected_text !== undefined) {
+                renderInspectionResult(json.data);
+                if (json.data.stats) updateStatsUI(json.data.stats);
+                setProcessingState(false);
+            }
         }
+
+        // BƯỚC 4: Polling dự phòng phòng trường hợp WebSocket mất kết nối
+        let pollCount = 0;
+        const pollInterval = setInterval(async () => {
+            pollCount++;
+            if (!state.isProcessing || pollCount > 25) {
+                clearInterval(pollInterval);
+                return;
+            }
+            try {
+                const sRes = await fetch("/api/status");
+                if (sRes.ok) {
+                    const sData = await sRes.json();
+                    if (sData.last_result && JSON.stringify(sData.last_result) !== JSON.stringify(state.lastResult)) {
+                        renderInspectionResult(sData.last_result);
+                        if (sData.stats) updateStatsUI(sData.stats);
+                        setProcessingState(false);
+                        clearInterval(pollInterval);
+                    }
+                }
+            } catch (err) {}
+        }, 500);
+
     } catch (e) {
         appendLog({ time: getTimestamp(), text: `Lỗi kích chụp: ${e.message}`, level: "error" });
-    } finally {
-        setTimeout(() => {
-            el.btnTriggerShot.disabled = false;
-            el.btnTriggerShot.style.opacity = "1";
-        }, 150);
+        setProcessingState(false);
     }
 }
 

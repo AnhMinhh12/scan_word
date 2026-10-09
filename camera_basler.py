@@ -21,9 +21,11 @@ except ImportError:
 
 
 class BaslerGigECamera:
-    def __init__(self, ip_address="192.168.3.3", exposure_time=2000.0):
+    def __init__(self, ip_address="192.168.3.3", exposure_time=25000.0, auto_exposure=True, gain=0.0):
         self.ip_address = ip_address
         self.exposure_time = exposure_time
+        self.auto_exposure = auto_exposure
+        self.gain = gain
         self.camera = None
         self.converter = None
         self.is_connected = False
@@ -37,21 +39,39 @@ class BaslerGigECamera:
 
         tl_factory = pylon.TlFactory.GetInstance()
 
-        # Cách 1: Tìm thiết bị khớp đúng địa chỉ IP trong danh sách mạng
+        # Kiểm tra danh sách thiết bị Basler khả dụng trên toàn bộ cổng mạng
         devices = tl_factory.EnumerateDevices()
+        if not devices:
+            raise RuntimeError(
+                f"Không phát hiện camera Basler nào trên cổng mạng! "
+                f"Vui lòng kiểm tra: (1) Cáp mạng Ethernet đã cắm chặt vào cổng LAN trên PC chưa, "
+                f"(2) Nguồn camera (12V/24V hoặc PoE) đã cấp điện và sáng đèn Led chưa."
+            )
+
         target_device_info = None
+        found_devs_info = []
 
         for dev in devices:
-            dev_ip = dev.GetIpAddress() if hasattr(dev, "GetIpAddress") else dev.GetPropertyOrDefault("IpAddress", "")
+            dev_ip = dev.GetIpAddress() if hasattr(dev, "GetIpAddress") else dev.GetPropertyOrDefault("IpAddress", "N/A")
+            model = dev.GetModelName() if hasattr(dev, "GetModelName") else "Basler Camera"
+            found_devs_info.append(f"{model} [IP: {dev_ip}]")
             if dev_ip == self.ip_address:
                 target_device_info = dev
                 break
 
-        # Cách 2: Nếu không duyệt thấy bằng EnumerateDevices, thử tạo DeviceInfo gán IP trực tiếp
+        # Nếu không khớp IP cấu hình nhưng chỉ có duy nhất 1 camera Basler cắm vào máy -> Tự động nhận diện luôn
         if target_device_info is None:
-            info = pylon.DeviceInfo()
-            info.SetIpAddress(self.ip_address)
-            target_device_info = info
+            if len(devices) == 1:
+                target_device_info = devices[0]
+                auto_ip = target_device_info.GetIpAddress() if hasattr(target_device_info, "GetIpAddress") else self.ip_address
+                print(f"[BASLER] Tự động chọn camera duy nhất tìm thấy: {target_device_info.GetModelName()} (IP: {auto_ip})")
+                self.ip_address = auto_ip
+            else:
+                info_list = ", ".join(found_devs_info)
+                raise RuntimeError(
+                    f"Không tìm thấy camera khớp IP {self.ip_address}. "
+                    f"Các camera Basler đang thấy trên mạng: {info_list}. Vui lòng đổi CAMERA_IP trong config.py."
+                )
 
         try:
             device = tl_factory.CreateDevice(target_device_info)
@@ -71,7 +91,7 @@ class BaslerGigECamera:
             except Exception as e:
                 print(f"[CẢNH BÁO] Không thể chỉnh TriggerMode: {e}")
 
-            # 2. Cấu hình Packet Size GigE phù hợp card mạng (1500 bytes tránh drop packet trên card Realtek)
+            # 2. Cấu hình Packet Size GigE phù hợp card mạng (1500 bytes chuẩn Ethernet)
             try:
                 if hasattr(self.camera, "GevSCPSPacketSize"):
                     pkt_size = getattr(config, "PACKET_SIZE", 1500)
@@ -95,15 +115,21 @@ class BaslerGigECamera:
             except Exception:
                 pass
 
-            # Khởi tạo bộ chuyển đổi định dạng ảnh sang BGR8 của OpenCV
+            # 5. Khởi tạo bộ chuyển đổi định dạng ảnh sang BGR8 của OpenCV
             self.converter = pylon.ImageFormatConverter()
             self.converter.OutputPixelFormat = pylon.PixelType_BGR8packed
             self.converter.OutputBitAlignment = pylon.OutputBitAlignment_MsbAligned
 
-            # Cấu hình Exposure Time ban đầu
-            self.set_exposure_time(self.exposure_time)
+            # 6. Cấu hình Exposure Time và Gain TRƯỚC KHI StartGrabbing để tránh gián đoạn luồng
+            try:
+                if not self.auto_exposure:
+                    self.set_exposure_time(self.exposure_time)
+                self.set_auto_exposure(self.auto_exposure)
+                self.set_gain(self.gain)
+            except Exception as e:
+                print(f"[CẢNH BÁO] Lỗi áp cấu hình phơi sáng ban đầu: {e}")
 
-            # Bắt đầu chế độ lấy ảnh
+            # 7. Bắt đầu thu nhận ảnh
             self.camera.StartGrabbing(pylon.GrabStrategy_LatestImageOnly)
 
             print(f"[BASLER] Đã kết nối thành công: Model={self.model_name}, S/N={self.serial_number}, IP={self.ip_address}")
